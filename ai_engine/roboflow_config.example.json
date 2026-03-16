@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "server_url": "http://127.0.0.1:9001",
+  "api_key": "",
+  "confidence": 0.35,
+  "overlap": 0.3,
+  "models": [
+    "hard-hat-workers/13",
+    "ppe-detection-yj4rr/1",
+    "vest-cye3g/1",
+    "glasses-bk4z5/1"
+  ]
+}

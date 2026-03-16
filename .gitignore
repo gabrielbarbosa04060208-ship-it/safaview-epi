@@ -13,3 +13,4 @@ ai_engine/models/yolov8n.pt
 .env
 .DS_Store
 Thumbs.db
+ai_engine/roboflow_config.json

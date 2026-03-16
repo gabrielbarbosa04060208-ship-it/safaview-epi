@@ -14,6 +14,14 @@
 
 import random
 import time
+import json
+import os
+import urllib.request
+
+try:
+    from inference_sdk import InferenceHTTPClient
+except Exception:
+    InferenceHTTPClient = None
 from pathlib import Path
 
 import cv2
@@ -24,6 +32,13 @@ MODELS_DIR = Path(__file__).parent / 'models'
 BEST_PT    = MODELS_DIR / 'best.pt'
 PPE_PT     = MODELS_DIR / 'ppe_keremberke.pt'
 PROTO_PT   = MODELS_DIR / 'yolov8n.pt'
+ROBOFLOW_CONFIG = Path(__file__).parent / 'roboflow_config.json'
+ROBOFLOW_DEFAULT_MODELS = [
+    'hard-hat-workers/13',
+    'ppe-detection-yj4rr/1',
+    'vest-cye3g/1',
+    'glasses-bk4z5/1',
+]
 
 # ── Classes do modelo keremberke PPE ─────────────────────────────────────────
 # Índices confirmados do keremberke/yolov8s-ppe-detection
@@ -76,6 +91,26 @@ class EPIDetector:
         self.iou  = iou
         self._heuristic_states: dict = {}
         self._heuristic_timer:  dict = {}
+        self.rf_client = None
+
+        roboflow_cfg = self._load_roboflow_config()
+        if roboflow_cfg:
+            self.rf_config = roboflow_cfg
+            self.mode = 'roboflow_local'
+            self.model = None
+            self.rf_server = roboflow_cfg['server_url'].rstrip('/')
+            self.rf_models = roboflow_cfg['models']
+            self.rf_api_key = roboflow_cfg.get('api_key', '')
+            self.rf_confidence = roboflow_cfg.get('confidence', self.conf)
+            self.rf_overlap = roboflow_cfg.get('overlap', 0.30)
+            if InferenceHTTPClient is not None:
+                self.rf_client = InferenceHTTPClient(api_url=self.rf_server, api_key=self.rf_api_key or None)
+            else:
+                print('[Detector] inference-sdk não encontrado, usando fallback HTTP.', flush=True)
+            print(f'[Detector] Roboflow local habilitado: {len(self.rf_models)} modelo(s).', flush=True)
+            print(f'[Detector] Servidor: {self.rf_server}', flush=True)
+            print(f'[Detector] Modo: {self.mode}', flush=True)
+            return
 
         if BEST_PT.exists():
             print(f'[Detector] Modelo TREINADO: {BEST_PT}', flush=True)
@@ -99,13 +134,145 @@ class EPIDetector:
 
         print(f'[Detector] Modo: {self.mode}', flush=True)
 
+    def _load_roboflow_config(self):
+        if not ROBOFLOW_CONFIG.exists():
+            return None
+        try:
+            data = json.loads(ROBOFLOW_CONFIG.read_text(encoding='utf-8'))
+        except Exception as e:
+            print(f'[Detector] roboflow_config.json inválido: {e}', flush=True)
+            return None
+
+        if not data.get('enabled'):
+            return None
+
+        models = [str(m).strip() for m in data.get('models', []) if str(m).strip()]
+        if not models:
+            models = list(ROBOFLOW_DEFAULT_MODELS)
+            print('[Detector] Roboflow sem modelos explícitos: usando defaults.', flush=True)
+
+        server_url = str(data.get('server_url') or os.getenv('ROBOFLOW_SERVER_URL') or 'http://127.0.0.1:9001').strip()
+        return {
+            'server_url': server_url,
+            'models': models,
+            'api_key': str(data.get('api_key') or os.getenv('ROBOFLOW_API_KEY') or '').strip(),
+            'confidence': float(data.get('confidence', self.conf)),
+            'overlap': float(data.get('overlap', 0.30)),
+        }
+
     def detect(self, frame: np.ndarray) -> dict:
+        if self.mode == 'roboflow_local':
+            return self._detect_roboflow(frame)
         if self.mode == 'real':
             return self._detect_trained(frame)
         elif self.mode == 'ppe_public':
             return self._detect_ppe(frame)
         else:
             return self._detect_heuristic(frame)
+
+    def _infer_roboflow_model(self, model_id: str, frame: np.ndarray, img_b64: str):
+        if self.rf_client is not None:
+            result = self.rf_client.infer(frame, model_id=model_id)
+            return result if isinstance(result, dict) else {'predictions': result}
+
+        # Fallback HTTP direto (caso inference-sdk não esteja disponível)
+        endpoint = f'{self.rf_server}/{model_id}'
+        payload = {
+            'image': {'type': 'base64', 'value': img_b64},
+            'confidence': self.rf_confidence,
+            'overlap': self.rf_overlap,
+        }
+        if self.rf_api_key:
+            payload['api_key'] = self.rf_api_key
+
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with urllib.request.urlopen(req, timeout=2.5) as resp:
+            raw = resp.read().decode('utf-8', errors='ignore')
+            return json.loads(raw)
+
+    def _extract_predictions(self, payload: dict):
+        if isinstance(payload, list):
+            return payload
+        for key in ('predictions', 'detections', 'results'):
+            preds = payload.get(key)
+            if isinstance(preds, list):
+                return preds
+        if isinstance(payload.get('result'), dict):
+            for key in ('predictions', 'detections'):
+                preds = payload['result'].get(key)
+                if isinstance(preds, list):
+                    return preds
+        return []
+
+    @staticmethod
+    def _normalize_label(raw):
+        return str(raw or '').strip().lower().replace('_', '-').replace(' ', '-')
+
+    def _detect_roboflow(self, frame: np.ndarray) -> dict:
+        ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            return {'persons': 0, 'violations': {'noHelmet': False, 'noVest': False, 'noGloves': False, 'noGlasses': False}, 'boxes': [], 'riskIndex': 0.0}
+
+        import base64
+        img_b64 = base64.b64encode(buf).decode('utf-8')
+
+        boxes, persons = [], 0
+        violations = {'noHelmet': False, 'noVest': False, 'noGloves': False, 'noGlasses': False}
+
+        for model_id in self.rf_models:
+            try:
+                payload = self._infer_roboflow_model(model_id, frame, img_b64)
+                predictions = self._extract_predictions(payload)
+            except Exception:
+                continue
+
+            for pred in predictions:
+                label = self._normalize_label(pred.get('class') or pred.get('class_name') or pred.get('label'))
+                conf_val = float(pred.get('confidence', pred.get('conf', 0.0)) or 0.0)
+
+                x = float(pred.get('x', 0))
+                y = float(pred.get('y', 0))
+                w = float(pred.get('width', 0))
+                h = float(pred.get('height', 0))
+                if all(v > 0 for v in (w, h)):
+                    x1, y1 = int(max(x - w / 2, 0)), int(max(y - h / 2, 0))
+                    x2, y2 = int(min(x + w / 2, frame.shape[1] - 1)), int(min(y + h / 2, frame.shape[0] - 1))
+                else:
+                    x1 = int(max(pred.get('x1', 0), 0))
+                    y1 = int(max(pred.get('y1', 0), 0))
+                    x2 = int(min(pred.get('x2', frame.shape[1] - 1), frame.shape[1] - 1))
+                    y2 = int(min(pred.get('y2', frame.shape[0] - 1), frame.shape[0] - 1))
+
+                if label == 'person':
+                    persons += 1
+                if label in {'no-helmet', 'without-helmet', 'sem-capacete', 'without-hardhat', 'no-hardhat', 'hardhat-missing'}:
+                    violations['noHelmet'] = True
+                if label in {'no-vest', 'without-vest', 'sem-colete', 'no-safety-vest', 'without-safety-vest'}:
+                    violations['noVest'] = True
+                if label in {'no-gloves', 'without-gloves', 'sem-luvas'}:
+                    violations['noGloves'] = True
+                if label in {'no-glasses', 'without-glasses', 'sem-oculos', 'sem-óculos', 'without-goggles', 'no-goggles'}:
+                    violations['noGlasses'] = True
+
+                boxes.append({
+                    'cls': label or model_id,
+                    'label': f"{label or 'detected'} ({model_id})",
+                    'conf': round(conf_val, 2),
+                    'color': COLORS.get(label, (140, 120, 255)),
+                    'bbox': [x1, y1, x2, y2],
+                })
+
+        return {
+            'persons': persons,
+            'violations': violations,
+            'boxes': boxes,
+            'riskIndex': self._calc_risk(violations, max(persons, 1 if boxes else 0)),
+        }
 
     # ── Modelo treinado (Pilar 1) — todos os 4 EPIs ───────────────────────────
     def _detect_trained(self, frame: np.ndarray) -> dict:
