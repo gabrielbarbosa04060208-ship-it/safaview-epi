@@ -1,0 +1,15 @@
+node_modules/
+apps/safeview/node_modules/
+apps/dashboard/node_modules/
+apps/safeview/dist/
+apps/dashboard/dist/
+dist-electron/
+apps/
+ai_engine/venv/
+ai_engine/models/yolov8n.pt
+*.db
+*.zip
+*.exe
+.env
+.DS_Store
+Thumbs.db

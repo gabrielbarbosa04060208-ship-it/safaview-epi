@@ -1,0 +1,46 @@
+{
+  "name": "safeview-epi-desktop",
+  "version": "1.0.0",
+  "description": "SafeView EPI — Sistema de Monitoramento de Equipamentos de Proteção Individual (Desktop)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "cross-env NODE_ENV=development electron .",
+    "build:safeview":  "cd apps/safeview && npm run build",
+    "build:dashboard": "cd apps/dashboard && npm run build",
+    "build": "npm run build:safeview && npm run build:dashboard && electron-builder"
+  },
+  "dependencies": {
+    "sql.js": "^1.12.0",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "build": {
+    "appId": "com.safeview.epi",
+    "productName": "SafeView EPI",
+    "icon": "electron/icon.ico",
+    "asar": false,
+    "win": {
+      "target": "nsis",
+      "icon": "electron/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*",
+      "apps/safeview/dist/**/*",
+      "apps/dashboard/dist/**/*",
+      "node_modules/**/*"
+    ]
+  }
+}
