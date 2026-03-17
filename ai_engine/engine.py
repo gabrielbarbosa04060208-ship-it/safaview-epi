@@ -9,6 +9,7 @@ import asyncio
 import base64
 import json
 import os
+import platform
 import sys
 import traceback
 from pathlib import Path
@@ -42,9 +43,26 @@ def init_camera():
     if not camera_indexes:
         camera_indexes = list(range(6))  # tenta câmera 0..5
 
+    # Backend pode ser forçado via SAFEVIEW_CAMERA_BACKEND (ex.: CAP_DSHOW, CAP_MSMF, CAP_V4L2)
+    requested_backend = os.getenv('SAFEVIEW_CAMERA_BACKEND', '').strip().upper()
     backends = []
-    if hasattr(cv2, 'CAP_DSHOW'):
-        backends.append(('CAP_DSHOW', cv2.CAP_DSHOW))
+    if requested_backend:
+        if hasattr(cv2, requested_backend):
+            backends.append((requested_backend, getattr(cv2, requested_backend)))
+            log(f'Backend forçado via SAFEVIEW_CAMERA_BACKEND={requested_backend}')
+        else:
+            log(f'Backend inválido em SAFEVIEW_CAMERA_BACKEND={requested_backend}. Ignorando.')
+
+    if not backends:
+        system = platform.system().lower()
+        if system == 'windows':
+            for b in ('CAP_DSHOW', 'CAP_MSMF'):
+                if hasattr(cv2, b):
+                    backends.append((b, getattr(cv2, b)))
+        elif system == 'linux' and hasattr(cv2, 'CAP_V4L2'):
+            backends.append(('CAP_V4L2', cv2.CAP_V4L2))
+        elif system == 'darwin' and hasattr(cv2, 'CAP_AVFOUNDATION'):
+            backends.append(('CAP_AVFOUNDATION', cv2.CAP_AVFOUNDATION))
     backends.append(('DEFAULT', None))
 
     for idx in camera_indexes:
@@ -54,6 +72,17 @@ def init_camera():
                 c.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
                 c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                 c.set(cv2.CAP_PROP_FPS,           30)
+                # Alguns drivers marcam opened, mas só começam a entregar frame após alguns reads
+                ok = False
+                for _ in range(5):
+                    ret, _ = c.read()
+                    if ret:
+                        ok = True
+                        break
+                if not ok:
+                    log(f'Câmera {idx} abriu via {backend_name}, mas não entregou frames no warmup.')
+                    c.release()
+                    continue
                 cap = c
                 log(f'Câmera {idx} aberta via backend {backend_name}.')
                 return True
@@ -95,12 +124,32 @@ async def inference_loop():
     fps_counter  = 0
     fps_timer    = time.time()
     current_fps  = 0.0
+    read_failures = 0
 
     while True:
         ret, frame = cap.read()
         if not ret:
+            read_failures += 1
+            if read_failures % 30 == 0:
+                log(f'Falha ao ler frame ({read_failures} consecutivas).')
+            if read_failures >= 120:
+                log('Muitas falhas de leitura. Tentando reabrir câmera...')
+                try:
+                    if cap:
+                        cap.release()
+                except Exception:
+                    pass
+                cap = None
+                if not init_camera():
+                    await broadcast(json.dumps({
+                        'type': 'ERROR',
+                        'message': 'Falha ao reabrir câmera. Verifique se outro app está usando a webcam.',
+                    }))
+                    await asyncio.sleep(1.0)
+                read_failures = 0
             await asyncio.sleep(0.05)
             continue
+        read_failures = 0
 
         if not clients:
             await asyncio.sleep(0.1)
