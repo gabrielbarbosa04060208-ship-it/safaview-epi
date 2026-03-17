@@ -94,11 +94,14 @@ class EPIDetector:
         self._heuristic_timer:  dict = {}
         self.rf_client = None
         self._last_rf_error_log = 0.0
+        self.fallback_model = None
+        self.fallback_mode = None
 
         self._ensure_roboflow_config_exists()
 
         roboflow_cfg = self._load_roboflow_config()
         if roboflow_cfg:
+            self._load_local_fallback()
             self.rf_config = roboflow_cfg
             self.mode = 'roboflow_local'
             self.model = None
@@ -113,6 +116,8 @@ class EPIDetector:
                 print('[Detector] inference-sdk não encontrado, usando fallback HTTP.', flush=True)
             print(f'[Detector] Roboflow local habilitado: {len(self.rf_models)} modelo(s).', flush=True)
             print(f'[Detector] Servidor: {self.rf_server}', flush=True)
+            if self.fallback_model is not None:
+                print(f'[Detector] Fallback local pronto: {self.fallback_mode}', flush=True)
             print(f'[Detector] Modo: {self.mode}', flush=True)
             return
 
@@ -137,6 +142,20 @@ class EPIDetector:
             )
 
         print(f'[Detector] Modo: {self.mode}', flush=True)
+
+    def _load_local_fallback(self):
+        if BEST_PT.exists():
+            self.fallback_model = YOLO(str(BEST_PT))
+            self.fallback_mode = 'real'
+            return
+        if PPE_PT.exists():
+            self.fallback_model = YOLO(str(PPE_PT))
+            self.fallback_mode = 'ppe_public'
+            return
+        if PROTO_PT.exists():
+            self.fallback_model = YOLO(str(PROTO_PT))
+            self.fallback_mode = 'heuristic'
+            return
 
     def _load_roboflow_config(self):
         if not ROBOFLOW_CONFIG.exists():
@@ -302,6 +321,13 @@ class EPIDetector:
         rf_status = 'ok'
         if success_models == 0 and failed_models > 0:
             rf_status = 'all_models_failed'
+            if self.fallback_model is not None:
+                local_result = self._detect_with_model(self.fallback_model, self.fallback_mode, frame)
+                local_result['rfStatus'] = 'fallback_active'
+                local_result['rfSuccessfulModels'] = success_models
+                local_result['rfFailedModels'] = failed_models
+                local_result['mode'] = self.mode
+                return local_result
 
         return {
             'persons': persons,
@@ -312,6 +338,21 @@ class EPIDetector:
             'rfSuccessfulModels': success_models,
             'rfFailedModels': failed_models,
         }
+
+    def _detect_with_model(self, model, mode: str, frame: np.ndarray) -> dict:
+        current_model = self.model
+        current_mode = self.mode
+        try:
+            self.model = model
+            self.mode = mode
+            if mode == 'real':
+                return self._detect_trained(frame)
+            if mode == 'ppe_public':
+                return self._detect_ppe(frame)
+            return self._detect_heuristic(frame)
+        finally:
+            self.model = current_model
+            self.mode = current_mode
 
     # ── Modelo treinado (Pilar 1) — todos os 4 EPIs ───────────────────────────
     def _detect_trained(self, frame: np.ndarray) -> dict:
