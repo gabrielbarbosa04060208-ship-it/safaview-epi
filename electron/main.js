@@ -4,6 +4,7 @@ const path   = require('path');
 const fs     = require('fs');
 const { spawn } = require('child_process');
 const { startServer, stopServer } = require('./server');
+const { assertProjectReady } = require('./preflight');
 
 Menu.setApplicationMenu(null);
 
@@ -221,6 +222,14 @@ function createDashboardWindow() {
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  try {
+    assertProjectReady();
+  } catch (err) {
+    dialog.showErrorBox('SafeView EPI — Configuração Incompleta', err.message);
+    app.quit();
+    return;
+  }
+
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
