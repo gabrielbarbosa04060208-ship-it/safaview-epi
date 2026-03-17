@@ -18,7 +18,7 @@ export interface EpiFrame {
   fps:        number;
   mode:       'real' | 'prototipo' | 'roboflow_local' | 'ppe_public' | 'heuristic' | 'carregando';
   riskIndex:  number;        // 0.0 – 1.0
-  rfStatus:   'ok' | 'all_models_failed' | 'encoding_failed';
+  rfStatus:   'ok' | 'all_models_failed' | 'encoding_failed' | 'fallback_active';
   rfSuccessfulModels: number;
   rfFailedModels: number;
 }
@@ -35,7 +35,7 @@ export function useEpiDetection() {
   const [mode,       setMode]       = useState<'real' | 'prototipo' | 'carregando'>('carregando');
   const [connected,  setConnected]  = useState(false);
   const [riskIndex,  setRiskIndex]  = useState(0);
-  const [rfStatus,   setRfStatus]   = useState<'ok' | 'all_models_failed' | 'encoding_failed'>('ok');
+  const [rfStatus,   setRfStatus]   = useState<'ok' | 'all_models_failed' | 'encoding_failed' | 'fallback_active'>('ok');
   const [rfSuccessfulModels, setRfSuccessfulModels] = useState(0);
   const [rfFailedModels, setRfFailedModels] = useState(0);
 

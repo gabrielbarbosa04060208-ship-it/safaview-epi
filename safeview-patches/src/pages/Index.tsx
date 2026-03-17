@@ -130,6 +130,9 @@ export default function Index() {
     if (mode === 'roboflow_local' && rfStatus === 'all_models_failed') {
       toast.warning('Roboflow conectado, mas nenhum modelo respondeu neste momento.');
     }
+    if (mode === 'roboflow_local' && rfStatus === 'fallback_active') {
+      toast.warning('Roboflow indisponível no momento. Fallback local de detecção foi ativado.');
+    }
   }, [mode, rfStatus]);
 
   const modeLabel: Record<string, string> = {
@@ -214,9 +217,11 @@ export default function Index() {
             </div>
           )}
 
-          {mode === 'roboflow_local' && rfStatus === 'all_models_failed' && (
+          {mode === 'roboflow_local' && (rfStatus === 'all_models_failed' || rfStatus === 'fallback_active') && (
             <div className="absolute bottom-3 right-3 rounded-md bg-yellow-700/90 px-2 py-1 text-xs text-white backdrop-blur-sm">
-              Roboflow sem resposta ({rfSuccessfulModels} ok / {rfFailedModels} falhas)
+              {rfStatus === 'fallback_active'
+                ? `Fallback local ativo (${rfSuccessfulModels} ok / ${rfFailedModels} falhas Roboflow)`
+                : `Roboflow sem resposta (${rfSuccessfulModels} ok / ${rfFailedModels} falhas)`}
             </div>
           )}
         </div>
