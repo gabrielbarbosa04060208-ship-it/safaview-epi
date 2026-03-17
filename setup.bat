@@ -39,21 +39,23 @@ echo Verificando Python...
 where python >nul 2>nul
 if errorlevel 1 goto ERRO_PYTHON
 python --version >nul 2>nul
-if errorlevel 1 goto ERRO_PYTHON_EXEC
+if errorlevel 1 goto ERRO_PYTHON
 for /f "tokens=2 delims= " %%v in ('python --version') do set PYTHON_VERSION=%%v
 for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
     set PYTHON_MAJOR=%%a
     set PYTHON_MINOR=%%b
 )
 
-if "%PYTHON_MAJOR%"=="3" (
-    if %PYTHON_MINOR% LSS 9 goto ERRO_PYTHON_VERSION
-    if %PYTHON_MINOR% GTR 12 goto ERRO_PYTHON_VERSION
-) else (
-    goto ERRO_PYTHON_VERSION
-)
+if not "%PYTHON_MAJOR%"=="3" goto ERRO_PYTHON_VERSION
+if %PYTHON_MINOR% LSS 9 goto ERRO_PYTHON_VERSION
 
-echo [OK] Python encontrado (^%PYTHON_VERSION%^).
+if %PYTHON_MINOR% GTR 12 (
+    echo [AVISO] Python ^%PYTHON_VERSION%^ detectado.
+    echo         Esta versao e experimental para este projeto.
+    echo         Se falhar no pip, use Python 3.12 para maior compatibilidade.
+) else (
+    echo [OK] Python encontrado (^%PYTHON_VERSION%^).
+)
 goto START_CLONE
 
 :ERRO_PYTHON
@@ -65,19 +67,10 @@ echo.
 pause
 exit /b 1
 
-:ERRO_PYTHON_EXEC
-echo.
-echo [ERRO] Python foi encontrado no PATH, mas nao executa corretamente.
-echo        Se voce instalou via Microsoft Store, instale o Python oficial.
-echo        Download: https://www.python.org/downloads/
-echo.
-pause
-exit /b 1
-
 :ERRO_PYTHON_VERSION
 echo.
 echo [ERRO] Versao do Python nao suportada: %PYTHON_VERSION%
-echo        Use Python 3.9 ate 3.12 para evitar falhas nas dependencias de IA.
+echo        Use Python 3.9+ (recomendado: 3.12).
 echo        Download: https://www.python.org/downloads/
 echo.
 pause
