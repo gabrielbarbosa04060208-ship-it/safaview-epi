@@ -39,7 +39,7 @@ echo Verificando Python...
 where python >nul 2>nul
 if errorlevel 1 goto ERRO_PYTHON
 python --version >nul 2>nul
-if errorlevel 1 goto ERRO_PYTHON_EXEC
+if errorlevel 1 goto ERRO_PYTHON
 for /f "tokens=2 delims= " %%v in ('python --version') do set PYTHON_VERSION=%%v
 for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
     set PYTHON_MAJOR=%%a
@@ -67,14 +67,6 @@ echo.
 pause
 exit /b 1
 
-:ERRO_PYTHON_EXEC
-echo.
-echo [ERRO] Python foi encontrado no PATH, mas nao executa corretamente.
-echo        Se voce instalou via Microsoft Store, instale o Python oficial.
-echo        Download: https://www.python.org/downloads/
-echo.
-pause
-exit /b 1
 
 :ERRO_PYTHON_VERSION
 echo.
