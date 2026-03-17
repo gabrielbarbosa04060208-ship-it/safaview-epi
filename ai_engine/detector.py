@@ -191,24 +191,41 @@ class EPIDetector:
             return result if isinstance(result, dict) else {'predictions': result}
 
         # Fallback HTTP direto (caso inference-sdk não esteja disponível)
-        endpoint = f'{self.rf_server}/{model_id}'
         payload = {
+            'model_id': model_id,
             'image': {'type': 'base64', 'value': img_b64},
             'confidence': self.rf_confidence,
+            # Compatibilidade entre versões: algumas usam overlap, outras iou_threshold
             'overlap': self.rf_overlap,
+            'iou_threshold': self.rf_overlap,
+            'max_detections': 300,
         }
         if self.rf_api_key:
             payload['api_key'] = self.rf_api_key
 
-        req = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload).encode('utf-8'),
-            headers={'Content-Type': 'application/json'},
-            method='POST',
-        )
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            raw = resp.read().decode('utf-8', errors='ignore')
-            return json.loads(raw)
+        endpoints = [
+            f'{self.rf_server}/infer/{model_id}',
+            f'{self.rf_server}/{model_id}',
+        ]
+        last_exc = None
+
+        for endpoint in endpoints:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode('utf-8'),
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=4.0) as resp:
+                    raw = resp.read().decode('utf-8', errors='ignore')
+                    return json.loads(raw)
+            except Exception as e:
+                last_exc = e
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError('Falha desconhecida ao consultar Roboflow.')
 
     def _extract_predictions(self, payload: dict):
         if isinstance(payload, list):
