@@ -10,8 +10,36 @@ Menu.setApplicationMenu(null);
 let safeviewWindow  = null;
 let dashboardWindow = null;
 let aiProcess       = null;
+let aiRestartTimer  = null;
+let isShuttingDown  = false;
 
 const ICON_PATH = path.join(__dirname, 'icon.ico');
+
+function resolvePythonCommand() {
+  const isWin = process.platform === 'win32';
+  const venvPy = isWin
+    ? path.join(__dirname, '..', 'ai_engine', 'venv', 'Scripts', 'python.exe')
+    : path.join(__dirname, '..', 'ai_engine', 'venv', 'bin', 'python');
+
+  if (fs.existsSync(venvPy)) {
+    return { cmd: venvPy, args: [] };
+  }
+
+  // Fallbacks para quando o setup.bat ainda não criou o venv
+  if (isWin) {
+    return { cmd: 'py', args: ['-3'] };
+  }
+  return { cmd: 'python3', args: [] };
+}
+
+function scheduleAiRestart(reason) {
+  if (isShuttingDown || aiRestartTimer) return;
+  console.log(`[AI] Agendando reinício em 3s (${reason}).`);
+  aiRestartTimer = setTimeout(() => {
+    aiRestartTimer = null;
+    startAiEngine();
+  }, 3000);
+}
 
 // ── AI Engine (Python subprocess) ────────────────────────────────────────────
 function startAiEngine() {
@@ -22,16 +50,19 @@ function startAiEngine() {
     return;
   }
 
-  // Prefere venv criado pelo setup.bat; fallback para Python do sistema
-  const venvPy   = path.join(__dirname, '..', 'ai_engine', 'venv', 'Scripts', 'python.exe');
-  const pythonExe = fs.existsSync(venvPy) ? venvPy : 'python';
+  if (aiProcess) {
+    return;
+  }
 
-  console.log(`[AI] Iniciando: ${pythonExe} engine.py`);
+  const { cmd, args } = resolvePythonCommand();
+  const spawnArgs = [...args, 'engine.py'];
 
-  aiProcess = spawn(pythonExe, ['engine.py'], {
+  console.log(`[AI] Iniciando: ${cmd} ${spawnArgs.join(' ')}`);
+
+  aiProcess = spawn(cmd, spawnArgs, {
     cwd:   path.join(__dirname, '..', 'ai_engine'),
     stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,  // não abre janela de terminal separada
+    windowsHide: true,
   });
 
   aiProcess.stdout.on('data', (d) => process.stdout.write(`[AI] ${d}`));
@@ -40,14 +71,23 @@ function startAiEngine() {
     console.error('[AI] Falha ao iniciar Python:', err.message);
     console.error('[AI] Verifique se Python está instalado e se o venv foi criado pelo setup.bat.');
     aiProcess = null;
+    scheduleAiRestart('erro ao iniciar processo');
   });
   aiProcess.on('close', (code) => {
     console.log(`[AI] Processo encerrado (código ${code})`);
     aiProcess = null;
+    if (!isShuttingDown && code !== 0) {
+      scheduleAiRestart(`saída inesperada (código ${code})`);
+    }
   });
 }
 
 function stopAiEngine() {
+  isShuttingDown = true;
+  if (aiRestartTimer) {
+    clearTimeout(aiRestartTimer);
+    aiRestartTimer = null;
+  }
   if (aiProcess) {
     aiProcess.kill();
     aiProcess = null;
@@ -210,6 +250,7 @@ app.whenReady().then(async () => {
   createDashboardWindow();
 
   app.on('activate', () => {
+    if (!aiProcess) startAiEngine();
     if (!safeviewWindow)  createSafeviewWindow();
     if (!dashboardWindow) createDashboardWindow();
   });
