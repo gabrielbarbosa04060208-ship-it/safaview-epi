@@ -16,8 +16,11 @@ export interface EpiFrame {
   persons:    number;
   violations: Violations;
   fps:        number;
-  mode:       'real' | 'prototipo';
+  mode:       'real' | 'prototipo' | 'roboflow_local' | 'ppe_public' | 'heuristic' | 'carregando';
   riskIndex:  number;        // 0.0 – 1.0
+  rfStatus:   'ok' | 'all_models_failed' | 'encoding_failed';
+  rfSuccessfulModels: number;
+  rfFailedModels: number;
 }
 
 const EMPTY_VIOLATIONS: Violations = {
@@ -32,6 +35,9 @@ export function useEpiDetection() {
   const [mode,       setMode]       = useState<'real' | 'prototipo' | 'carregando'>('carregando');
   const [connected,  setConnected]  = useState(false);
   const [riskIndex,  setRiskIndex]  = useState(0);
+  const [rfStatus,   setRfStatus]   = useState<'ok' | 'all_models_failed' | 'encoding_failed'>('ok');
+  const [rfSuccessfulModels, setRfSuccessfulModels] = useState(0);
+  const [rfFailedModels, setRfFailedModels] = useState(0);
 
   const wsRef    = useRef<WebSocket | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,6 +65,9 @@ export function useEpiDetection() {
         setPersons(0);
         setViolations(EMPTY_VIOLATIONS);
         setFps(0);
+        setRfStatus('ok');
+        setRfSuccessfulModels(0);
+        setRfFailedModels(0);
         // Reconexão automática a cada 3s — Python pode levar alguns segundos para iniciar
         retryRef.current = setTimeout(connect, 3000);
       };
@@ -88,6 +97,9 @@ export function useEpiDetection() {
             setFps(data.fps ?? 0);
             setMode(data.mode ?? 'prototipo');
             setRiskIndex(data.riskIndex ?? 0);
+            setRfStatus(data.rfStatus ?? 'ok');
+            setRfSuccessfulModels(data.rfSuccessfulModels ?? 0);
+            setRfFailedModels(data.rfFailedModels ?? 0);
 
             lastEpiData.current = {
               frame:      data.frame,
@@ -96,6 +108,9 @@ export function useEpiDetection() {
               fps:        data.fps ?? 0,
               mode:       data.mode ?? 'prototipo',
               riskIndex:  data.riskIndex ?? 0,
+              rfStatus: data.rfStatus ?? 'ok',
+              rfSuccessfulModels: data.rfSuccessfulModels ?? 0,
+              rfFailedModels: data.rfFailedModels ?? 0,
             };
           }
         } catch {
@@ -125,6 +140,9 @@ export function useEpiDetection() {
     mode,
     connected,
     riskIndex,
+    rfStatus,
+    rfSuccessfulModels,
+    rfFailedModels,
     getLastEpiData,
   };
 }

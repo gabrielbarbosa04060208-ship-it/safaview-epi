@@ -33,6 +33,7 @@ BEST_PT    = MODELS_DIR / 'best.pt'
 PPE_PT     = MODELS_DIR / 'ppe_keremberke.pt'
 PROTO_PT   = MODELS_DIR / 'yolov8n.pt'
 ROBOFLOW_CONFIG = Path(__file__).parent / 'roboflow_config.json'
+ROBOFLOW_CONFIG_EXAMPLE = Path(__file__).parent / 'roboflow_config.example.json'
 ROBOFLOW_DEFAULT_MODELS = [
     'hard-hat-workers/13',
     'ppe-detection-yj4rr/1',
@@ -92,6 +93,9 @@ class EPIDetector:
         self._heuristic_states: dict = {}
         self._heuristic_timer:  dict = {}
         self.rf_client = None
+        self._last_rf_error_log = 0.0
+
+        self._ensure_roboflow_config_exists()
 
         roboflow_cfg = self._load_roboflow_config()
         if roboflow_cfg:
@@ -136,6 +140,7 @@ class EPIDetector:
 
     def _load_roboflow_config(self):
         if not ROBOFLOW_CONFIG.exists():
+            print('[Detector] Roboflow desabilitado: roboflow_config.json não encontrado.', flush=True)
             return None
         try:
             data = json.loads(ROBOFLOW_CONFIG.read_text(encoding='utf-8'))
@@ -144,6 +149,7 @@ class EPIDetector:
             return None
 
         if not data.get('enabled'):
+            print('[Detector] Roboflow desabilitado: enabled=false no roboflow_config.json.', flush=True)
             return None
 
         models = [str(m).strip() for m in data.get('models', []) if str(m).strip()]
@@ -159,6 +165,15 @@ class EPIDetector:
             'confidence': float(data.get('confidence', self.conf)),
             'overlap': float(data.get('overlap', 0.30)),
         }
+
+    def _ensure_roboflow_config_exists(self):
+        if ROBOFLOW_CONFIG.exists() or not ROBOFLOW_CONFIG_EXAMPLE.exists():
+            return
+        try:
+            ROBOFLOW_CONFIG.write_text(ROBOFLOW_CONFIG_EXAMPLE.read_text(encoding='utf-8'), encoding='utf-8')
+            print('[Detector] roboflow_config.json criado automaticamente a partir do exemplo.', flush=True)
+        except Exception as e:
+            print(f'[Detector] Falha ao criar roboflow_config.json: {e}', flush=True)
 
     def detect(self, frame: np.ndarray) -> dict:
         if self.mode == 'roboflow_local':
@@ -216,19 +231,33 @@ class EPIDetector:
     def _detect_roboflow(self, frame: np.ndarray) -> dict:
         ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if not ok:
-            return {'persons': 0, 'violations': {'noHelmet': False, 'noVest': False, 'noGloves': False, 'noGlasses': False}, 'boxes': [], 'riskIndex': 0.0}
+            return {
+                'persons': 0,
+                'violations': {'noHelmet': False, 'noVest': False, 'noGloves': False, 'noGlasses': False},
+                'boxes': [],
+                'riskIndex': 0.0,
+                'rfStatus': 'encoding_failed',
+            }
 
         import base64
         img_b64 = base64.b64encode(buf).decode('utf-8')
 
         boxes, persons = [], 0
         violations = {'noHelmet': False, 'noVest': False, 'noGloves': False, 'noGlasses': False}
+        success_models = 0
+        failed_models = 0
 
         for model_id in self.rf_models:
             try:
                 payload = self._infer_roboflow_model(model_id, frame, img_b64)
                 predictions = self._extract_predictions(payload)
-            except Exception:
+                success_models += 1
+            except Exception as e:
+                failed_models += 1
+                now = time.time()
+                if now - self._last_rf_error_log > 2.0:
+                    print(f'[Detector][Roboflow] Falha no modelo {model_id}: {type(e).__name__}: {e}', flush=True)
+                    self._last_rf_error_log = now
                 continue
 
             for pred in predictions:
@@ -267,11 +296,18 @@ class EPIDetector:
                     'bbox': [x1, y1, x2, y2],
                 })
 
+        rf_status = 'ok'
+        if success_models == 0 and failed_models > 0:
+            rf_status = 'all_models_failed'
+
         return {
             'persons': persons,
             'violations': violations,
             'boxes': boxes,
             'riskIndex': self._calc_risk(violations, max(persons, 1 if boxes else 0)),
+            'rfStatus': rf_status,
+            'rfSuccessfulModels': success_models,
+            'rfFailedModels': failed_models,
         }
 
     # ── Modelo treinado (Pilar 1) — todos os 4 EPIs ───────────────────────────

@@ -217,6 +217,16 @@ if errorlevel 1 goto ERRO_PY_DEPS
 call ai_engine\venv\Scripts\python.exe -m pip install -r ai_engine\requirements.txt --retries 5 --timeout 120 >> "%PIP_LOG%" 2>&1
 if errorlevel 1 goto ERRO_PY_DEPS
 echo     [OK] Dependencias Python instaladas.
+
+if not exist "ai_engine\roboflow_config.json" (
+    if exist "ai_engine\roboflow_config.example.json" (
+        copy /Y "ai_engine\roboflow_config.example.json" "ai_engine\roboflow_config.json" >nul
+        echo     [OK] roboflow_config.json criado a partir do exemplo.
+    ) else (
+        echo     [AVISO] roboflow_config.example.json nao encontrado.
+    )
+)
+
 goto DOWNLOAD_MODEL
 
 :ERRO_VENV

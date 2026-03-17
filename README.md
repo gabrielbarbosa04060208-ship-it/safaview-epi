@@ -62,6 +62,8 @@ Edite `ai_engine/roboflow_config.json`:
 - `models`: lista com os IDs dos modelos (você pode trocar/adicionar no futuro).
 - `api_key`: opcional (se seu servidor exigir)
 
+> Se `roboflow_config.json` não existir, o app cria automaticamente a partir do `roboflow_config.example.json`.
+
 ### Modelos padrão integrados nesta versão
 - `hard-hat-workers/13`
 - `ppe-detection-yj4rr/1`
@@ -76,6 +78,17 @@ Com `enabled: true`, o engine passa a operar em `mode = roboflow_local` e:
 - envia cada frame para os modelos configurados
 - agrega as detecções para a interface já existente
 - marca violações por classe (`no-helmet`, `no-vest`, `no-gloves`, `no-glasses`)
+
+Se todos os modelos do Roboflow falharem em sequência, a interface mostra aviso de diagnóstico sem derrubar a sessão.
+
+### 3.1) Seleção de webcam (opcional)
+Se sua webcam não estiver no índice padrão, configure:
+
+```bash
+SAFEVIEW_CAMERA_INDEX=1
+```
+
+Sem essa variável, o engine testa índices `0..5` e tenta backend `CAP_DSHOW` + backend padrão do OpenCV.
 
 ### 4) Convenção recomendada de labels nos modelos
 Para funcionar "plug and play", use classes com nomes próximos a:
