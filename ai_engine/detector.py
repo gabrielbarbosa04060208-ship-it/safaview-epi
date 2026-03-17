@@ -186,19 +186,22 @@ class EPIDetector:
             return self._detect_heuristic(frame)
 
     def _infer_roboflow_model(self, model_id: str, frame: np.ndarray, img_b64: str):
+        # Endpoint HTTP oficial do inference-server local
+        endpoint = f'{self.rf_server}/infer/{model_id}'
+
         if self.rf_client is not None:
             result = self.rf_client.infer(frame, model_id=model_id)
             return result if isinstance(result, dict) else {'predictions': result}
 
         # Fallback HTTP direto (caso inference-sdk não esteja disponível)
-        endpoint = f'{self.rf_server}/{model_id}'
         payload = {
+            'api_key': self.rf_api_key,
+            'model_id': model_id,
             'image': {'type': 'base64', 'value': img_b64},
             'confidence': self.rf_confidence,
-            'overlap': self.rf_overlap,
+            'iou_threshold': self.rf_overlap,
+            'max_detections': 300,
         }
-        if self.rf_api_key:
-            payload['api_key'] = self.rf_api_key
 
         req = urllib.request.Request(
             endpoint,
@@ -206,7 +209,7 @@ class EPIDetector:
             headers={'Content-Type': 'application/json'},
             method='POST',
         )
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
+        with urllib.request.urlopen(req, timeout=4.0) as resp:
             raw = resp.read().decode('utf-8', errors='ignore')
             return json.loads(raw)
 
