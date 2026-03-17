@@ -45,7 +45,8 @@ function EpiBadge({ label, ok }: { label: string; ok: boolean }) {
 
 export default function Index() {
   const {
-    frame, violations, persons, fps, mode, connected, riskIndex
+    frame, violations, persons, fps, mode, connected, riskIndex,
+    rfStatus, rfSuccessfulModels, rfFailedModels,
   } = useEpiDetection();
 
   const { startSession, updateMetrics, recordAlert, endSession } = useSessionPersistence();
@@ -125,8 +126,15 @@ export default function Index() {
   const anyViolation = violations.noHelmet || violations.noVest ||
                        violations.noGloves || violations.noGlasses;
 
+  useEffect(() => {
+    if (mode === 'roboflow_local' && rfStatus === 'all_models_failed') {
+      toast.warning('Roboflow conectado, mas nenhum modelo respondeu neste momento.');
+    }
+  }, [mode, rfStatus]);
+
   const modeLabel: Record<string, string> = {
     real:        'Detecção Real',
+    roboflow_local: 'Roboflow Local',
     ppe_public:  'PPE Público',
     heuristic:   'Protótipo',
     prototipo:   'Protótipo',
@@ -203,6 +211,12 @@ export default function Index() {
           {connected && persons > 0 && (
             <div className="absolute bottom-3 left-3 rounded-md bg-black/60 px-2 py-1 text-xs text-white backdrop-blur-sm">
               👷 {persons} {persons === 1 ? 'pessoa detectada' : 'pessoas detectadas'}
+            </div>
+          )}
+
+          {mode === 'roboflow_local' && rfStatus === 'all_models_failed' && (
+            <div className="absolute bottom-3 right-3 rounded-md bg-yellow-700/90 px-2 py-1 text-xs text-white backdrop-blur-sm">
+              Roboflow sem resposta ({rfSuccessfulModels} ok / {rfFailedModels} falhas)
             </div>
           )}
         </div>

@@ -8,6 +8,7 @@
 import asyncio
 import base64
 import json
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -30,16 +31,35 @@ def log(msg):
 
 def init_camera():
     global cap
-    for idx in range(3):   # tenta câmera 0, 1, 2
-        c = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-        if c.isOpened():
-            c.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
-            c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            c.set(cv2.CAP_PROP_FPS,           30)
-            cap = c
-            log(f'Câmera {idx} aberta.')
-            return True
-    log('ERRO: Nenhuma câmera encontrada.')
+    configured_idx = os.getenv('SAFEVIEW_CAMERA_INDEX', '').strip()
+    camera_indexes = []
+    if configured_idx:
+        try:
+            camera_indexes = [int(configured_idx)]
+            log(f'Tentando câmera configurada por SAFEVIEW_CAMERA_INDEX={camera_indexes[0]}')
+        except ValueError:
+            log(f'Valor inválido em SAFEVIEW_CAMERA_INDEX: {configured_idx}. Ignorando.')
+    if not camera_indexes:
+        camera_indexes = list(range(6))  # tenta câmera 0..5
+
+    backends = []
+    if hasattr(cv2, 'CAP_DSHOW'):
+        backends.append(('CAP_DSHOW', cv2.CAP_DSHOW))
+    backends.append(('DEFAULT', None))
+
+    for idx in camera_indexes:
+        for backend_name, backend in backends:
+            c = cv2.VideoCapture(idx, backend) if backend is not None else cv2.VideoCapture(idx)
+            if c.isOpened():
+                c.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+                c.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                c.set(cv2.CAP_PROP_FPS,           30)
+                cap = c
+                log(f'Câmera {idx} aberta via backend {backend_name}.')
+                return True
+            c.release()
+
+    log(f'ERRO: Nenhuma câmera encontrada. Índices testados: {camera_indexes}; backends: {[b[0] for b in backends]}')
     return False
 
 async def broadcast(msg: str):
@@ -60,7 +80,10 @@ async def inference_loop():
     if not init_camera():
         # Sem câmera — envia mensagem de erro para o frontend
         while True:
-            msg = json.dumps({'type': 'ERROR', 'message': 'Câmera não encontrada.'})
+            msg = json.dumps({
+                'type': 'ERROR',
+                'message': 'Câmera não encontrada. Verifique conexão/permissão e SAFEVIEW_CAMERA_INDEX.',
+            })
             await broadcast(msg)
             await asyncio.sleep(2)
 
@@ -108,6 +131,10 @@ async def inference_loop():
             'violations': result['violations'],
             'fps':        round(current_fps, 1),
             'mode':       detector.mode,
+            'riskIndex':  result.get('riskIndex', 0.0),
+            'rfStatus':   result.get('rfStatus', 'ok'),
+            'rfSuccessfulModels': result.get('rfSuccessfulModels', 0),
+            'rfFailedModels': result.get('rfFailedModels', 0),
         })
         await broadcast(msg)
 
