@@ -38,7 +38,22 @@ exit /b 1
 echo Verificando Python...
 where python >nul 2>nul
 if errorlevel 1 goto ERRO_PYTHON
-echo [OK] Python encontrado.
+python --version >nul 2>nul
+if errorlevel 1 goto ERRO_PYTHON_EXEC
+for /f "tokens=2 delims= " %%v in ('python --version') do set PYTHON_VERSION=%%v
+for /f "tokens=1,2 delims=." %%a in ("%PYTHON_VERSION%") do (
+    set PYTHON_MAJOR=%%a
+    set PYTHON_MINOR=%%b
+)
+
+if "%PYTHON_MAJOR%"=="3" (
+    if %PYTHON_MINOR% LSS 9 goto ERRO_PYTHON_VERSION
+    if %PYTHON_MINOR% GTR 12 goto ERRO_PYTHON_VERSION
+) else (
+    goto ERRO_PYTHON_VERSION
+)
+
+echo [OK] Python encontrado (^%PYTHON_VERSION%^).
 goto START_CLONE
 
 :ERRO_PYTHON
@@ -46,6 +61,24 @@ echo.
 echo [ERRO] Python NAO encontrado!
 echo        Instale em: https://www.python.org/downloads/
 echo        IMPORTANTE: marque "Add Python to PATH" na instalacao.
+echo.
+pause
+exit /b 1
+
+:ERRO_PYTHON_EXEC
+echo.
+echo [ERRO] Python foi encontrado no PATH, mas nao executa corretamente.
+echo        Se voce instalou via Microsoft Store, instale o Python oficial.
+echo        Download: https://www.python.org/downloads/
+echo.
+pause
+exit /b 1
+
+:ERRO_PYTHON_VERSION
+echo.
+echo [ERRO] Versao do Python nao suportada: %PYTHON_VERSION%
+echo        Use Python 3.9 ate 3.12 para evitar falhas nas dependencias de IA.
+echo        Download: https://www.python.org/downloads/
 echo.
 pause
 exit /b 1
@@ -181,7 +214,14 @@ echo     [OK] venv Python ja existe.
 
 :INSTALL_PY_DEPS
 echo     Instalando dependencias Python (pode demorar alguns minutos)...
-call ai_engine\venv\Scripts\pip.exe install -r ai_engine\requirements.txt --quiet
+set PIP_LOG=ai_engine\pip-install.log
+if exist "%PIP_LOG%" del "%PIP_LOG%"
+
+echo     Atualizando pip/setuptools/wheel...
+call ai_engine\venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel --retries 5 --timeout 120 >> "%PIP_LOG%" 2>&1
+if errorlevel 1 goto ERRO_PY_DEPS
+
+call ai_engine\venv\Scripts\python.exe -m pip install -r ai_engine\requirements.txt --retries 5 --timeout 120 >> "%PIP_LOG%" 2>&1
 if errorlevel 1 goto ERRO_PY_DEPS
 echo     [OK] Dependencias Python instaladas.
 goto DOWNLOAD_MODEL
@@ -193,6 +233,8 @@ exit /b 1
 
 :ERRO_PY_DEPS
 echo [ERRO] Falha ao instalar dependencias Python.
+echo        Veja detalhes em: ai_engine\pip-install.log
+echo        Dica: confirme conexao com internet e se firewall/proxy libera pypi.org.
 pause
 exit /b 1
 
